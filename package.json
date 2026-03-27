@@ -1,0 +1,16 @@
+{
+  "name": "caseai-backend",
+  "version": "1.0.0",
+  "description": "CaseAI Backend - OOREP + Claude for verified homoeopathic case analysis",
+  "main": "server.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "oorep-mcp": "latest"
+  }
+}
