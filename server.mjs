@@ -1,29 +1,37 @@
 /**
- * CaseAI Backend Server v2
- * OOREP verified rubrics + Claude with full remedy grading
+ * CaseAI Backend Server v3
+ * Fixed CORS for all origins including Hostinger websites
  */
 
 import express from 'express';
-import cors from 'cors';
 import { createOOREPClient } from 'oorep-mcp';
 
 const app = express();
-app.use(cors());
+
+// ─── CORS: Allow ALL origins ──────────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access');
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
+
 app.use(express.json());
 
-// ─── OOREP CLIENT ──────────────────────────────────────────────────────────────
+// ─── OOREP CLIENT ─────────────────────────────────────────────────────────────
 const oorep = createOOREPClient({
   baseUrl: 'https://www.oorep.com',
   timeoutMs: 15000,
   maxResults: 10,
 });
 
-// ─── SYSTEM PROMPT WITH REMEDY GRADING ────────────────────────────────────────
+// ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
 const HOMOEO_SYSTEM_PROMPT = `You are an expert classical homoeopathic physician and Repertory specialist trained in Kent's methodology, Boenninghausen's principles, and Hahnemann's Organon. You assist qualified homoeopathic doctors with case analysis.
 
-You will be given:
-1. A patient case (text from consultation)
-2. VERIFIED rubric names retrieved from Kent's Repertory database (OOREP)
+You will be given a patient case. Analyze it using classical homoeopathic principles.
 
 SYMPTOM HIERARCHY (strictly follow):
 LEVEL 1 - MENTAL GENERALS: Emotions, will, intellect, fears, anxiety, grief (HIGHEST PRIORITY)
@@ -36,26 +44,22 @@ WHAT TO IGNORE:
 - Symptoms without any modality unless very peculiar
 - Maintaining causes still present
 
-RUBRIC SELECTION:
-- Select 5 to 8 most characteristic rubrics from the verified list
-- Prefer complete symptoms (location + sensation + modality)
-- Mark SRP (Strange Rare Peculiar) symptoms explicitly
+RUBRIC SELECTION: Select 5 to 8 most characteristic rubrics. Mark SRP symptoms.
 
-REMEDY GRADING (most important part):
-For EVERY selected rubric, list remedies from Kent's Repertory with grades:
-- Grade 3 = CAPITALS e.g. ARS, PULS, SULPH (found in majority of provers, clinically verified)
-- Grade 2 = Title Case e.g. Calc, Lyc, Nat-m (found in few provers, occasionally verified)
-- Grade 1 = lowercase e.g. acon, bell, bry (clinical symptoms, not fully proven)
-Format: "ARS(3), PULS(3), Calc(2), Lyc(2), Nat-m(2), acon(1), bell(1)"
-Standard abbreviations: Ars=Arsenicum album, Puls=Pulsatilla, Sulph=Sulphur, Calc=Calcarea carb, Lyc=Lycopodium, Nat-m=Natrum muriaticum, Nux-v=Nux vomica, Sep=Sepia, Sil=Silicea, Thuj=Thuja, Bar-c=Baryta carb, Bry=Bryonia, Bell=Belladonna, Acon=Aconitum, Phos=Phosphorus, Graph=Graphites, Lach=Lachesis, Merc=Mercurius, Ign=Ignatia, Staph=Staphysagria, Caust=Causticum, Kali-c=Kali carbonicum, Arg-n=Argentum nitricum, Gels=Gelsemium, Rhus-t=Rhus tox, Apis=Apis mellifica, Carb-v=Carbo veg
+REMEDY GRADING for every rubric:
+- Grade 3 = CAPITALS: ARS, PULS, SULPH (proven in majority, clinically verified)
+- Grade 2 = Title Case: Calc, Lyc, Nat-m (proven in few, occasionally verified)
+- Grade 1 = lowercase: acon, bell, bry (clinical symptoms only)
+Format exactly: "ARS(3), PULS(3), Calc(2), Lyc(2), Nat-m(2), acon(1)"
 ALWAYS provide remedies for every rubric. Never leave remedies empty.
 
-REPERTORIZATION SUMMARY:
-After selecting rubrics, count which remedies appear most across all rubrics and add up their grades. Example: "ARS covers 6/7 rubrics total score 16, PULS covers 5/7 total score 12, Calc covers 4/7 total score 9"
+Common Kent abbreviations: Ars=Arsenicum album, Puls=Pulsatilla, Sulph=Sulphur, Calc=Calcarea carb, Lyc=Lycopodium, Nat-m=Natrum mur, Nux-v=Nux vomica, Sep=Sepia, Sil=Silicea, Thuj=Thuja, Bar-c=Baryta carb, Bry=Bryonia, Bell=Belladonna, Acon=Aconitum, Phos=Phosphorus, Graph=Graphites, Lach=Lachesis, Merc=Mercurius, Ign=Ignatia, Staph=Staphysagria, Caust=Causticum, Kali-c=Kali carbonicum, Arg-n=Argentum nitricum, Gels=Gelsemium, Rhus-t=Rhus tox, Apis=Apis mellifica, Carb-v=Carbo veg, Chin=China, Ferr=Ferrum met, Zinc=Zincum met, Plat=Platina, Verat=Veratrum album, Op=Opium, Stram=Stramonium
+
+REPERTORIZATION SUMMARY: Count which remedies appear most across all rubrics and total their grades. Example: "ARS covers 6/7 rubrics total score 16 - STRONGEST CANDIDATE. PULS covers 5/7 total score 12. Calc covers 4/7 total score 9."
 
 OUTPUT: Respond ONLY with valid JSON, no preamble, no markdown backticks:
 {
-  "case_summary": "3-4 sentences summarizing the case with symptom hierarchy and most characteristic symptoms",
+  "case_summary": "3-4 sentences summarizing the case highlighting most characteristic symptoms and their hierarchy",
   "selected_rubrics": [
     {
       "rubric": "MIND; ANXIETY; health, about",
@@ -63,17 +67,17 @@ OUTPUT: Respond ONLY with valid JSON, no preamble, no markdown backticks:
       "remedies": "ARS(3), PULS(3), Calc(2), Lyc(2), Nat-m(2), acon(1), bell(1)",
       "priority": "Mental General",
       "srp": false,
-      "reason": "Strong mental general, patient constantly anxious about health"
+      "reason": "Strong mental general - patient constantly anxious about health, reads about diseases"
     }
   ],
-  "repertorization_summary": "ARS covers 5/6 rubrics total score 14, PULS covers 4/6 total score 10, Calc covers 3/6 total score 8. Top three remedies to consider: Arsenicum album, Pulsatilla, Calcarea carb.",
-  "ignored_symptoms": "Any symptoms present but not repertorized and exact reason why",
-  "missing_information": "Specific questions doctor should still ask e.g. ask about thermal modality, ask about thirst quantity and temperature, ask about sleep position and time of waking",
-  "miasmatic_indicators": "Psoric/Sycotic/Syphilitic/Tubercular indicators with reasoning. If not determinable state so clearly.",
-  "clinical_notes": "Obstacles to cure, maintaining causes, or other clinically important observations"
+  "repertorization_summary": "ARS covers 5/6 rubrics total score 14 - STRONGEST. PULS covers 4/6 total score 10. Calc covers 3/6 total score 8. Top remedies to consider: Arsenicum album, Pulsatilla, Calcarea carb.",
+  "ignored_symptoms": "List symptoms not repertorized and exact reason",
+  "missing_information": "Specific questions doctor should ask e.g. thermal modality not recorded, thirst quantity not specified",
+  "miasmatic_indicators": "Psoric/Sycotic/Syphilitic/Tubercular indicators with reasoning",
+  "clinical_notes": "Obstacles to cure, maintaining causes, important clinical observations"
 }`;
 
-// ─── EXTRACT SYMPTOM KEYWORDS ─────────────────────────────────────────────────
+// ─── EXTRACT KEYWORDS ─────────────────────────────────────────────────────────
 function extractSymptomKeywords(caseText) {
   const domains = [
     { pattern: /anxi|fear|fright|grief|anger|irritab|sad|depress|worry|nervous/i, query: 'anxiety' },
@@ -97,7 +101,6 @@ function extractSymptomKeywords(caseText) {
     { pattern: /worse heat|agg heat/i, query: 'worse warmth' },
     { pattern: /worse motion|agg motion/i, query: 'worse motion' },
   ];
-
   const queries = new Set(['anxiety', 'thirst']);
   for (const { pattern, query } of domains) {
     if (pattern.test(caseText)) queries.add(query);
@@ -109,35 +112,21 @@ function extractSymptomKeywords(caseText) {
 async function searchVerifiedRubrics(symptoms) {
   const allRubrics = [];
   const errors = [];
-
   for (const symptom of symptoms) {
     try {
-      const result = await oorep.searchRepertory({
-        symptom,
-        maxResults: 5,
-        minWeight: 2,
-      });
-
+      const result = await oorep.searchRepertory({ symptom, maxResults: 5, minWeight: 2 });
       if (result && result.rubrics && result.rubrics.length > 0) {
         for (const rubric of result.rubrics) {
-          // Extract remedy names from whatever structure OOREP returns
           let remedyNames = [];
           if (Array.isArray(rubric.remedies)) {
-            remedyNames = rubric.remedies
-              .slice(0, 10)
-              .map(r => {
-                const name = r.nameAbbrev || r.nameLong || r.name || '';
-                const grade = r.weight || r.grade || 1;
-                return `${name}(${grade})`;
-              })
+            remedyNames = rubric.remedies.slice(0, 10)
+              .map(r => `${r.nameAbbrev || r.nameLong || r.name || ''}(${r.weight || r.grade || 1})`)
               .filter(r => r.length > 3);
           }
-
           allRubrics.push({
             rubric: rubric.rubricPath || rubric.fullPath || rubric.text || rubric.name || symptom,
             chapter: rubric.chapter || rubric.section || 'Unknown',
             remedyString: remedyNames.join(', '),
-            searchTerm: symptom,
             verified: true,
           });
         }
@@ -146,25 +135,10 @@ async function searchVerifiedRubrics(symptoms) {
       errors.push({ symptom, error: err.message });
     }
   }
-
   return { rubrics: allRubrics, errors };
 }
 
-// ─── FORMAT FOR CLAUDE ────────────────────────────────────────────────────────
-function formatRubricsForClaude(rubrics) {
-  if (!rubrics.length) return 'No verified rubrics retrieved. Use your training knowledge for rubric selection.';
-
-  const lines = rubrics.map((r, i) => {
-    const remedyPart = r.remedyString
-      ? `\n   Known remedies: ${r.remedyString}`
-      : '';
-    return `${i + 1}. [VERIFIED from Kent's Repertory] ${r.rubric}${remedyPart}`;
-  });
-
-  return lines.join('\n\n');
-}
-
-// ─── MAIN ANALYZE ROUTE ───────────────────────────────────────────────────────
+// ─── ANALYZE ROUTE ────────────────────────────────────────────────────────────
 app.post('/analyze', async (req, res) => {
   const { caseText, patientName, patientAge, apiKey } = req.body;
   if (!caseText || !apiKey) {
@@ -174,30 +148,20 @@ app.post('/analyze', async (req, res) => {
   try {
     const symptoms = extractSymptomKeywords(caseText);
     let verifiedRubrics = [];
-    let rubricErrors = [];
     let oorepAvailable = true;
 
     try {
-      const { rubrics, errors } = await searchVerifiedRubrics(symptoms);
+      const { rubrics } = await searchVerifiedRubrics(symptoms);
       verifiedRubrics = rubrics;
-      rubricErrors = errors;
-    } catch (oorepErr) {
+    } catch {
       oorepAvailable = false;
     }
 
     const verifiedContext = verifiedRubrics.length > 0
-      ? `\n\nVERIFIED RUBRICS FROM KENT'S REPERTORY (OOREP):\n${formatRubricsForClaude(verifiedRubrics)}\n\nSelect from these verified rubrics. For each selected rubric, provide complete remedy grades from your Kent's Repertory knowledge even if the remedy list above is incomplete.`
-      : `\n\nOOREP database unavailable. Use your Kent's Repertory training knowledge for rubric selection. Mark each rubric as requiring manual verification.`;
+      ? `\n\nVERIFIED RUBRICS FROM KENT'S REPERTORY:\n${verifiedRubrics.map((r, i) => `${i+1}. ${r.rubric}${r.remedyString ? ' | Known remedies: ' + r.remedyString : ''}`).join('\n')}\n\nSelect from these verified rubrics and provide complete remedy grades from your Kent knowledge.`
+      : `\n\nUse your Kent Repertory training knowledge for rubric selection.`;
 
-    const userMessage = `Analyze this homoeopathic case:
-
-PATIENT: ${patientName || 'Unknown'}, ${patientAge || 'Age not recorded'}
-
-CASE DETAILS:
-${caseText}
-${verifiedContext}
-
-Provide complete remedy grades for every rubric. The repertorization summary showing which remedies cover the most rubrics is essential.`;
+    const userMessage = `Analyze this homoeopathic case:\n\nPATIENT: ${patientName || 'Unknown'}, ${patientAge || 'Not recorded'}\n\n${caseText}\n${verifiedContext}`;
 
     const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -236,7 +200,6 @@ Provide complete remedy grades for every rubric. The repertorization summary sho
       metadata: {
         oorepAvailable,
         verifiedRubricsFound: verifiedRubrics.length,
-        symptomsSearched: symptoms,
         disclaimer: 'AI-assisted repertorization. Always verify in physical repertory before prescribing.',
       },
     });
@@ -246,7 +209,7 @@ Provide complete remedy grades for every rubric. The repertorization summary sho
   }
 });
 
-// ─── RUBRIC SEARCH ROUTE ──────────────────────────────────────────────────────
+// ─── RUBRIC SEARCH ────────────────────────────────────────────────────────────
 app.get('/rubrics', async (req, res) => {
   const { symptom, maxResults = 10 } = req.query;
   if (!symptom) return res.status(400).json({ error: 'symptom required' });
@@ -258,7 +221,7 @@ app.get('/rubrics', async (req, res) => {
   }
 });
 
-// ─── HEALTH ROUTE ─────────────────────────────────────────────────────────────
+// ─── HEALTH ───────────────────────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
   let oorepStatus = 'unknown';
   try {
@@ -273,9 +236,5 @@ app.get('/health', async (req, res) => {
 // ─── START ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`CaseAI Backend v2 running on http://localhost:${PORT}`);
-  console.log('Routes:');
-  console.log('  POST /analyze  - Full case analysis with OOREP + Claude');
-  console.log('  GET  /rubrics  - Direct OOREP rubric search');
-  console.log('  GET  /health   - Server health check');
+  console.log(`CaseAI Backend v3 running on http://localhost:${PORT}`);
 });
