@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server.mjs",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "server.mjs"
+    }
+  ]
+}
+```
+
+4. Click **"Commit changes..."**
+5. Click **"Commit changes"** again in the popup
+
+---
+
+**Step 3: Vercel auto-redeploys**
+
+As soon as you commit, Vercel automatically detects the change and redeploys. Wait about 1 minute.
+
+---
+
+**Step 4: Find your Vercel URL**
+
+Go back to **vercel.com**, open your project, and look for a URL that looks like:
+```
+https://caseai-backend-something.vercel.app
+```
+
+Add `/health` to the end and open it in your browser:
+```
+https://caseai-backend-something.vercel.app/health
